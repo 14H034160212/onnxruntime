@@ -305,23 +305,12 @@ Status PrepareForReduce(const Tensor* X,
     prepare_reduce_metadata.output_dims = input_shape.AsShapeVector();
     for (auto axis : axes) {
       axis = HandleNegativeAxis(axis, rank);
-      ORT_ENFORCE(keepdims || input_dims[axis] != 0,
-                  "Can't reduce on dim with value of 0 if 'keepdims' is false. "
-                  "Invalid output shape would be produced. input_shape:",
-                  input_shape);
       prepare_reduce_metadata.output_dims[axis] = 1;
       reduced[axis] = true;
     }
   } else {
     // no axes provided (i.e.) default axes  => reduce on all dims
-    prepare_reduce_metadata.output_dims.reserve(input_dims.size());
-    for (auto dim : input_dims) {
-      ORT_ENFORCE(keepdims || dim != 0,
-                  "Can't reduce on dim with value of 0 if 'keepdims' is false. "
-                  "Invalid output shape would be produced. input_shape:",
-                  input_shape);
-      prepare_reduce_metadata.output_dims.push_back(1);
-    }
+    prepare_reduce_metadata.output_dims.assign(input_dims.size(), 1);
   }
 
   if (keepdims) {
@@ -416,6 +405,13 @@ Status ReduceComputeCore(const AllocatorPtr& gpu_allocator, const CudaKernel* ke
     } else if (cudnn_reduce_op == CUDNN_REDUCE_TENSOR_MUL) {
       // Identity for product is 1
       Fill(stream, output_data, ToCudaType<T>::FromFloat(1.0f), output_count);
+    } else if (calculate_log || log_sum_exp) {
+      // ReduceLogSum and ReduceLogSumExp of an empty set are log(0) = -inf.
+      if constexpr (std::numeric_limits<T>::has_infinity) {
+        Fill(stream, output_data, ToCudaType<T>::FromFloat(-std::numeric_limits<float>::infinity()), output_count);
+      } else {
+        Fill(stream, output_data, static_cast<CudaT>(std::numeric_limits<T>::lowest()), output_count);
+      }
     } else {
       // Identity for sum, mean, norm1, norm2 is 0
       CUDA_RETURN_IF_ERROR(cudaMemsetAsync(output.MutableDataRaw(), 0, output.SizeInBytes(), stream));

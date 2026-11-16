@@ -4189,7 +4189,6 @@ TEST(ReductionOpTest, ReduceDimWithZero2) {
                // TODO: fix reduce kernel for zero set cases. see: https://github.com/microsoft/onnxruntime/issues/18588
                {
                    kCoreMLExecutionProvider,
-                   kCudaExecutionProvider,
                    kCudaNHWCExecutionProvider,
                    kDnnlExecutionProvider,
                    kMIGraphXExecutionProvider,
@@ -6375,7 +6374,6 @@ void test_empty_set(const std::string& op, int opset, bool axes_as_input, float 
       "",
       {
           kCoreMLExecutionProvider,
-          kCudaExecutionProvider,
           kCudaNHWCExecutionProvider,
           kDmlExecutionProvider,
           kDnnlExecutionProvider,
@@ -6459,6 +6457,44 @@ TEST(ReductionOpTest, EmptySetNoopWithMissingAxes) {
 TEST(ReductionOpTest, EmptySetNoopWithEmptyAxes) {
   TestEmptySetNoopWithEmptyAxes("ReduceSum", false);
   TestEmptySetNoopWithEmptyAxes("ReduceLogSumExp", false);
+}
+
+// Reducing over an empty axis with keepdims=0 yields the identity value with the reduced axes removed.
+void TestEmptySetNoKeepDims(const std::string& op, const std::vector<int64_t>& input_shape,
+                            const std::vector<int64_t>& axes, const std::vector<int64_t>& output_shape,
+                            float empty_value) {
+  OpTester test(op, 18);
+  test.AddAttribute("keepdims", int64_t(0));
+  test.AddInput<float>("data", input_shape, {});
+  if (!axes.empty()) {
+    test.AddInput<int64_t>("axes", {static_cast<int64_t>(axes.size())}, axes);
+  }
+  int64_t output_size = std::accumulate(output_shape.begin(), output_shape.end(), static_cast<int64_t>(1),
+                                        std::multiplies<int64_t>());
+  test.AddOutput<float>("reduced", output_shape, std::vector<float>(output_size, empty_value));
+  test.Run(OpTester::ExpectResult::kExpectSuccess, "",
+           {
+               kCoreMLExecutionProvider,
+               kCudaNHWCExecutionProvider,
+               kDmlExecutionProvider,
+               kDnnlExecutionProvider,
+               kMIGraphXExecutionProvider,
+               kOpenVINOExecutionProvider,
+               kQnnExecutionProvider,
+               kTensorrtExecutionProvider,
+               kWebGpuExecutionProvider,
+           });
+}
+
+TEST(ReductionOpTest, EmptySetNoKeepDims) {
+  const float inf = std::numeric_limits<float>::infinity();
+  for (const auto& [op, empty_value] : std::vector<std::pair<std::string, float>>{
+           {"ReduceSum", 0.0f}, {"ReduceProd", 1.0f}, {"ReduceMax", -inf}, {"ReduceMin", inf}, {"ReduceLogSum", -inf}, {"ReduceLogSumExp", -inf}}) {
+    SCOPED_TRACE(op);
+    TestEmptySetNoKeepDims(op, {1, 0, 0, 4}, {}, {}, empty_value);          // all axes -> scalar
+    TestEmptySetNoKeepDims(op, {1, 0, 4}, {1}, {1, 4}, empty_value);        // empty axis
+    TestEmptySetNoKeepDims(op, {1, 0, 0, 4}, {2}, {1, 0, 4}, empty_value);  // empty output
+  }
 }
 
 TEST(ReductionOpTest, empty_set_ReduceL1) {
