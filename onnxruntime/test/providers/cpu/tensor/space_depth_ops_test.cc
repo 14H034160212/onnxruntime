@@ -188,7 +188,9 @@ TEST(TensorOpTest, SpaceDepthOpset28RejectsInvalidAttributesAndShapes) {
     test.AddAttribute("blocksize", int64_t{2});
     test.AddInput<float>("input", {1, 1, 3, 4}, std::vector<float>(12));
     test.AddOutput<float>("output", {1, 4, 1, 2}, std::vector<float>(8));
-    run_on_cpu(test, "input height to be a multiple");
+    // Rejected by the kernel ("input height to be a multiple of block_size"), or by ONNX shape inference
+    // ("must be a multiple of 'blocksize'") when the ONNX version checks it.
+    run_on_cpu(test, "be a multiple of");
   }
 
   {
@@ -196,8 +198,11 @@ TEST(TensorOpTest, SpaceDepthOpset28RejectsInvalidAttributesAndShapes) {
     test.SetAllowUnreleasedOnnxOpset();
     test.AddAttribute("blocksize", int64_t{2});
     test.AddInput<float>("input", {1, 3, 1, 1}, std::vector<float>(3));
-    test.AddOutput<float>("output", {1, 1, 2, 2}, std::vector<float>(4));
-    run_on_cpu(test, "Can't merge shape info");
+    // Declare the shape that integer-division shape inference produces (3 / 4 = 0 channels), so the model
+    // loads where ONNX does not check divisibility and the kernel has to reject the input. ONNX versions
+    // that check it reject the model with "must be a multiple of 'blocksize' * 'blocksize'".
+    test.AddOutput<float>("output", {1, 0, 2, 2}, std::vector<float>{});
+    run_on_cpu(test, "be a multiple of");
   }
 }
 
