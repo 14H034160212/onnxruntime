@@ -3,6 +3,8 @@
 
 #include <random>
 #include <cmath>
+#include <functional>
+#include <numeric>
 #include <type_traits>
 #include "gtest/gtest.h"
 #include "test/providers/provider_test_utils.h"
@@ -334,6 +336,24 @@ TEST(ReductionOpTest, ReduceSumTraining_int32) {
   test.AddInput<int64_t>("axes", {2}, {0, 2}, true /*is_initializer*/);
   test.AddOutput<int32_t>("reduced", {1, 2, 1}, {33, 45});
   test.Run();
+}
+
+TEST(ReductionOpTest, ReduceSumTraining_int32_empty_set) {
+  // The sum of an empty set is 0, with and without keepdims.
+  struct Case {
+    int64_t keepdims;
+    std::vector<int64_t> axes, output_shape;
+  };
+  for (const auto& c : std::vector<Case>{{0, {}, {}}, {0, {1}, {2, 4}}, {1, {1}, {2, 1, 4}}}) {
+    OpTester test("ReduceSumTraining", 1, onnxruntime::kMSDomain);
+    test.AddAttribute("keepdims", c.keepdims);
+    test.AddInput<int32_t>("data", {2, 0, 4}, {});
+    test.AddInput<int64_t>("axes", {static_cast<int64_t>(c.axes.size())}, c.axes, true /*is_initializer*/);
+    const auto output_size = std::accumulate(c.output_shape.begin(), c.output_shape.end(), int64_t{1},
+                                             std::multiplies<int64_t>());
+    test.AddOutput<int32_t>("reduced", c.output_shape, std::vector<int32_t>(output_size, 0));
+    test.Run();
+  }
 }
 
 TEST(ReductionOpTest, ReduceSumTraining_fast_matrix_reduction) {

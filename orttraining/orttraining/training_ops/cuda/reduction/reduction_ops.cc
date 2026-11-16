@@ -98,9 +98,11 @@ Status ReduceKernel<true>::ComputeImplEx<int32_t, CUDNN_REDUCE_TENSOR_NO_INDICES
   auto& input_dims_cudnn = prepare_reduce_metadata.input_dims_cudnn;
   auto& output_dims_cudnn = prepare_reduce_metadata.output_dims_cudnn;
 
-  // special case when there is a dim value of 0 in the shape.
+  // special case when there is a dim value of 0 in the shape: the sum of an empty set is 0.
   if (input_count == 0) {
-    assert(Y->Shape().Size() == 0);
+    if (Y->Shape().Size() > 0) {
+      CUDA_RETURN_IF_ERROR(cudaMemsetAsync(Y->MutableDataRaw(), 0, Y->SizeInBytes(), Stream(ctx)));
+    }
     return Status::OK();
   }
 
