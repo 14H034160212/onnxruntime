@@ -827,12 +827,12 @@ Status ReduceKernel<allow_multi_axes>::ComputeImpl(OpKernelContext* ctx, cudnnRe
                                                    Stream(ctx), GetComputeStream(ctx), TryGetCudnnHandle(ctx));
 }
 
-#define SPECIALIZED_REDUCEKERNEL_COMPUTEIMPL(T)                                                                           \
+#define SPECIALIZED_REDUCEKERNEL_COMPUTEIMPL_WITH_CUDA_TYPE(T, CudaStorageT)                                              \
   template <>                                                                                                             \
   template <>                                                                                                             \
   Status ReduceKernel<true>::ComputeImpl<T, CUDNN_REDUCE_TENSOR_NO_INDICES>(                                              \
       OpKernelContext * ctx, cudnnReduceTensorOp_t cudnn_reduce_op) const {                                               \
-    typedef typename ToCudaType<T>::MappedType CudaT;                                                                     \
+    typedef CudaStorageT CudaT;                                                                                           \
     const Tensor* X = ctx->Input<Tensor>(0);                                                                              \
     TensorShapeVector axes;                                                                                               \
     size_t num_inputs = ctx->InputCount();                                                                                \
@@ -866,6 +866,12 @@ Status ReduceKernel<allow_multi_axes>::ComputeImpl(OpKernelContext* ctx, cudnnRe
     if (input_count == 0) {                                                                                               \
       if (output_count == 0) {                                                                                            \
         return Status::OK();                                                                                              \
+      }                                                                                                                   \
+      /* Like the CPU EP, an empty-set ReduceMax / ReduceMin on bool is left undefined. */                                \
+      if constexpr (std::is_same_v<T, bool>) {                                                                            \
+        return ORT_MAKE_STATUS(ONNXRUNTIME, NOT_IMPLEMENTED,                                                              \
+                               cudnn_reduce_op == CUDNN_REDUCE_TENSOR_MAX ? "ReduceMax" : "ReduceMin",                    \
+                               " is not defined for empty set with bool type");                                           \
       }                                                                                                                   \
       /* Empty-set reduction with non-empty output: fill with identity values per ONNX spec. */                           \
       auto* output_data = reinterpret_cast<CudaT*>(Y->MutableData<T>());                                                  \
@@ -966,10 +972,17 @@ Status ReduceKernel<allow_multi_axes>::ComputeImpl(OpKernelContext* ctx, cudnnRe
 //   - Impl_SaturatingCastFromDouble explicitly clamps to [T_MIN, T_MAX] before casting,
 //     avoiding the undefined behavior of out-of-range double→int conversions in C++.
 //   - This matches the CPU's explicit clamping logic in ReduceAggregatorL1/L2.
+#define SPECIALIZED_REDUCEKERNEL_COMPUTEIMPL(T) \
+  SPECIALIZED_REDUCEKERNEL_COMPUTEIMPL_WITH_CUDA_TYPE(T, typename ToCudaType<T>::MappedType)
+
 SPECIALIZED_REDUCEKERNEL_COMPUTEIMPL(int32_t)
 SPECIALIZED_REDUCEKERNEL_COMPUTEIMPL(int64_t)
 SPECIALIZED_REDUCEKERNEL_COMPUTEIMPL(int8_t)
 SPECIALIZED_REDUCEKERNEL_COMPUTEIMPL(uint8_t)
+// bool (ReduceMax / ReduceMin since opset 20, i.e. any / all) is stored as one byte holding 0 or 1, so it runs
+// through the uint8_t path: the max / min of 0s and 1s is again 0 or 1.
+static_assert(sizeof(bool) == sizeof(uint8_t));
+SPECIALIZED_REDUCEKERNEL_COMPUTEIMPL_WITH_CUDA_TYPE(bool, uint8_t)
 namespace ReductionOps {
 
 template <typename T, cudnnReduceTensorIndices_t ReduceTensorIndices>
@@ -1066,6 +1079,7 @@ REGISTER_KERNEL_VERSIONED_SINCE_TYPED(ReduceMax, int32_t, 20)
 REGISTER_KERNEL_VERSIONED_SINCE_TYPED(ReduceMax, int64_t, 20)
 REGISTER_KERNEL_VERSIONED_SINCE_TYPED(ReduceMax, int8_t, 20)
 REGISTER_KERNEL_VERSIONED_SINCE_TYPED(ReduceMax, uint8_t, 20)
+REGISTER_KERNEL_VERSIONED_SINCE_TYPED(ReduceMax, bool, 20)
 
 REGISTER_KERNEL_TYPED_AXES_INPUT_WITH_VERSIONED(ReduceMean, MLFloat16, 17, 18)
 REGISTER_KERNEL_TYPED_AXES_INPUT_WITH_VERSIONED(ReduceMean, float, 17, 18)
@@ -1094,6 +1108,7 @@ REGISTER_KERNEL_VERSIONED_SINCE_TYPED(ReduceMin, int32_t, 20)
 REGISTER_KERNEL_VERSIONED_SINCE_TYPED(ReduceMin, int64_t, 20)
 REGISTER_KERNEL_VERSIONED_SINCE_TYPED(ReduceMin, int8_t, 20)
 REGISTER_KERNEL_VERSIONED_SINCE_TYPED(ReduceMin, uint8_t, 20)
+REGISTER_KERNEL_VERSIONED_SINCE_TYPED(ReduceMin, bool, 20)
 
 REGISTER_KERNEL_TYPED_AXES_INPUT_WITH_VERSIONED(ReduceProd, MLFloat16, 17, 18)
 REGISTER_KERNEL_TYPED_AXES_INPUT_WITH_VERSIONED(ReduceProd, float, 17, 18)

@@ -1202,6 +1202,65 @@ TEST(ReductionOpTest, ReduceMax_default_axes_do_not_keep_dims) {
   test.Run(OpTester::ExpectResult::kExpectSuccess, "", {kTensorrtExecutionProvider});  // TensorRT: full reduce without keepDimensions is not supported with explicit batch //TensorRT: axis must be 0
 }
 
+// ReduceMax / ReduceMin on bool are any / all. Rows of 257 elements: all false, all true, and a single true or false
+// in the first, a middle and the last position.
+TEST(ReductionOpTest, ReduceMaxMinBoolAnyAll) {
+  constexpr int64_t kRows = 8, kCols = 257;
+  // std::vector<bool> has no data(), so the tensors are kept in plain bool arrays.
+  auto data = std::make_unique<bool[]>(kRows * kCols);  // zero-initialized: all false
+  auto row = [&](int64_t r) { return data.get() + r * kCols; };
+  std::fill(row(1), row(2), true);  // all true
+  row(2)[0] = true;                 // single true first
+  row(3)[kCols / 2] = true;         // single true in the middle
+  row(4)[kCols - 1] = true;         // single true last
+  for (int64_t r : {5, 6, 7}) std::fill(row(r), row(r + 1), true);
+  row(5)[0] = false;          // single false first
+  row(6)[kCols / 2] = false;  // single false in the middle
+  row(7)[kCols - 1] = false;  // single false last
+
+  const bool any[kRows] = {false, true, true, true, true, true, true, true};
+  const bool all[kRows] = {false, true, false, false, false, false, false, false};
+  for (const bool keepdims : {false, true}) {
+    for (const auto& [op, expected] : {std::pair<std::string, const bool*>{"ReduceMax", any}, {"ReduceMin", all}}) {
+      SCOPED_TRACE(op + (keepdims ? " keepdims" : ""));
+      OpTester test(op.c_str(), 20);
+      test.AddAttribute("keepdims", static_cast<int64_t>(keepdims));
+      test.AddInput<bool>("data", {kRows, kCols}, data.get(), kRows * kCols);
+      test.AddInput<int64_t>("axes", {1}, {1});
+      test.AddOutput<bool>("reduced", keepdims ? std::vector<int64_t>{kRows, 1} : std::vector<int64_t>{kRows},
+                           expected, kRows);
+      test.Run(OpTester::ExpectResult::kExpectSuccess, "", {kTensorrtExecutionProvider, kOpenVINOExecutionProvider});
+    }
+  }
+}
+
+// As on the CPU EP, an empty-set ReduceMax / ReduceMin on bool is an error rather than false / true.
+TEST(ReductionOpTest, ReduceMaxMinBoolEmptySet) {
+  for (const std::string op : {"ReduceMax", "ReduceMin"}) {
+    SCOPED_TRACE(op);
+    OpTester test(op.c_str(), 20);
+    test.AddAttribute("keepdims", static_cast<int64_t>(1));
+    test.AddInput<bool>("data", {2, 0, 3}, {});
+    test.AddInput<int64_t>("axes", {1}, {1});
+    test.AddOutput<bool>("reduced", {2, 1, 3}, {false, false, false, false, false, false});
+    test.Run(OpTester::ExpectResult::kExpectFailure, op + " is not defined for empty set with bool type",
+             {kTensorrtExecutionProvider, kOpenVINOExecutionProvider, kCoreMLExecutionProvider, kDnnlExecutionProvider,
+              kQnnExecutionProvider, kMIGraphXExecutionProvider});
+  }
+}
+
+// With noop_with_empty_axes and no axes, the input is returned unchanged.
+TEST(ReductionOpTest, ReduceMaxMinBoolNoopWithEmptyAxes) {
+  for (const std::string op : {"ReduceMax", "ReduceMin"}) {
+    SCOPED_TRACE(op);
+    OpTester test(op.c_str(), 20);
+    test.AddAttribute("noop_with_empty_axes", static_cast<int64_t>(1));
+    test.AddInput<bool>("data", {2, 3}, {true, false, true, false, false, true});
+    test.AddOutput<bool>("reduced", {2, 3}, {true, false, true, false, false, true});
+    test.Run(OpTester::ExpectResult::kExpectSuccess, "", {kTensorrtExecutionProvider, kOpenVINOExecutionProvider});
+  }
+}
+
 TEST(ReductionOpTest, test_bool_ReduceMax_0) {
   OpTester test("ReduceMax", 20);
   test.AddAttribute("keepdims", static_cast<int64_t>(0));
