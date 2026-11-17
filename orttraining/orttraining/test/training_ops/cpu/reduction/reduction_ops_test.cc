@@ -344,7 +344,7 @@ TEST(ReductionOpTest, ReduceSumTraining_int32_empty_set) {
     int64_t keepdims;
     std::vector<int64_t> axes, output_shape;
   };
-  for (const auto& c : std::vector<Case>{{0, {}, {}}, {0, {1}, {2, 4}}, {1, {1}, {2, 1, 4}}}) {
+  for (const auto& c : std::vector<Case>{{0, {}, {}}, {0, {1}, {2, 4}}, {1, {1}, {2, 1, 4}}, {0, {2}, {2, 0}}}) {
     OpTester test("ReduceSumTraining", 1, onnxruntime::kMSDomain);
     test.AddAttribute("keepdims", c.keepdims);
     test.AddInput<int32_t>("data", {2, 0, 4}, {});
