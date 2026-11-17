@@ -1245,7 +1245,7 @@ TEST(ReductionOpTest, ReduceMaxMinBoolEmptySet) {
     test.AddOutput<bool>("reduced", {2, 1, 3}, {false, false, false, false, false, false});
     test.Run(OpTester::ExpectResult::kExpectFailure, op + " is not defined for empty set with bool type",
              {kTensorrtExecutionProvider, kOpenVINOExecutionProvider, kCoreMLExecutionProvider, kDnnlExecutionProvider,
-              kQnnExecutionProvider, kMIGraphXExecutionProvider});
+              kQnnExecutionProvider, kMIGraphXExecutionProvider, kDmlExecutionProvider});
   }
 }
 
